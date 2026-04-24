@@ -30,7 +30,7 @@ def send_periodic_msg(token, name):
             try:
                 res = requests.post(url, headers=headers, json=payload)
                 if res.status_code == 200:
-                    print(f"📅 Message 'd' sent by {name}.")
+                    print(f"📜 Message 'daily' sent by {name}.")
                 else:
                     print(f"⚠️ {name} failed to send message: {res.text}")
             except Exception as e:
@@ -101,4 +101,3 @@ def vc_locker(token, name):
                             print(f"🔄 {name} rejoining in 1s...")
                             time.sleep(1)
                             ws.send(json.dumps(join_payload))
-
