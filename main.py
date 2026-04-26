@@ -1,34 +1,30 @@
-import os, json, time, threading, websocket, requests
+import os, json, time, threading, websocket, requests, random
 from flask import Flask
 
-# --- FLASK WEB SERVER ---
 app = Flask('')
 @app.route('/')
-def home(): return "🛰️ Triple-Sentinel Mobile-Status: Active"
+def home(): return "🛰️ Sentinel True-Random: Active"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- CONFIGURATION ---
+# --- CONFIG ---
 GUILD_ID = "777271906486976512"
-
-# SENTINEL 1: Token 1 (Daily Spam + VC Lock)
 VC_ONE_ID = "1494048330379034674"
-TOKEN_ONE = os.getenv("TOKEN_ONE")
-
-# SENTINEL 2: Token 2 (Silent Lock)
-VC_TWO_ID = "1489088008576700466"
-TOKEN_TWO = os.getenv("TOKEN_TWO")
-
-# SENTINEL 3: Token 3 (Mobile Status + New Channel)
+VC_TWO_ID = "1487672527370322132"
 VC_THREE_ID = "1388555164708900955"
-TOKEN_THREE = os.getenv("TOKEN_THREE")
 
-# --- DAILY SPAMMER (Only for Token 1) ---
+tokens = {
+    "Sentinel-1": {"token": os.getenv("TOKEN_ONE"), "channel": VC_ONE_ID, "mobile": False, "spam": True},
+    "Sentinel-2": {"token": os.getenv("TOKEN_TWO"), "channel": VC_TWO_ID, "mobile": False, "spam": False},
+    "Sentinel-3": {"token": os.getenv("TOKEN_THREE"), "channel": VC_THREE_ID, "mobile": True, "spam": False}
+}
+
 def daily_spammer():
-    if not TOKEN_ONE: return
-    header = {"Authorization": TOKEN_ONE.strip()}
+    token = tokens["Sentinel-1"]["token"]
+    if not token: return
+    header = {"Authorization": token.strip()}
     while True:
         try:
             requests.post(f"https://discord.com/api/v9/channels/{VC_ONE_ID}/messages",
@@ -36,18 +32,14 @@ def daily_spammer():
             time.sleep(300) 
         except: time.sleep(10)
 
-# --- MAIN VC LOCKER FUNCTION ---
-def vc_locker(token, channel_id, name, is_mute, is_deaf, send_video, is_mobile=False):
-    if not token:
-        print(f"⚠️ {name} token missing.")
-        return
+def vc_locker(token, channel_id, name, is_mobile):
+    if not token: return
 
     while True:
         try:
             ws = websocket.WebSocket()
             ws.connect('wss://gateway.discord.gg/?v=9&encoding=json', timeout=15)
             
-            # Identify logic: Switch between Desktop and Mobile
             properties = {
                 "$os": "android" if is_mobile else "windows",
                 "$browser": "Discord Android" if is_mobile else "Chrome",
@@ -64,20 +56,15 @@ def vc_locker(token, channel_id, name, is_mute, is_deaf, send_video, is_mobile=F
             }))
 
             join_payload = {
-                "op": 4, 
-                "d": {
-                    "guild_id": GUILD_ID, 
-                    "channel_id": channel_id,
-                    "self_mute": is_mute, 
-                    "self_deaf": True,
-                    "self_video": send_video,
-                    "self_stream": send_video
+                "op": 4, "d": {
+                    "guild_id": GUILD_ID, "channel_id": channel_id,
+                    "self_mute": True, "self_deaf": True,
+                    "self_video": not is_mobile, "self_stream": not is_mobile
                 }
             }
 
             last_heartbeat = 0
-            user_id = None
-
+            
             while True:
                 msg = ws.recv()
                 if not msg: break
@@ -86,35 +73,30 @@ def vc_locker(token, channel_id, name, is_mute, is_deaf, send_video, is_mobile=F
                 if data.get('op') == 10:
                     ws.send(json.dumps(join_payload))
 
-                if data.get('t') == "READY":
-                    user_id = data['d']['user']['id']
-                    print(f"✅ {name} locked (Mobile: {is_mobile})")
-
-                if data.get('t') == "VOICE_STATE_UPDATE":
-                    if data['d'].get('user_id') == user_id:
-                        if data['d'].get('channel_id') != channel_id:
-                            time.sleep(3)
-                            ws.send(json.dumps(join_payload))
-
                 if time.time() - last_heartbeat > 30:
+                    # --- THE CHANCE TO DISCONNECT ---
+                    # 1 in 150 chance every 30 seconds (~ once every 75 minutes on average)
+                    if random.randint(1, 150) == 7:
+                        print(f"🎲 {name}: Random disconnect triggered for wavy line.")
+                        break # Breaks the loop to disconnect
+                    
                     ws.send(json.dumps({"op": 1, "d": data.get('s')}))
-                    ws.send(json.dumps(join_payload)) 
                     last_heartbeat = time.time()
+
+            ws.close()
+            # Wait a random 7 minutes (approx 420 seconds)
+            time.sleep(random.randint(400, 480))
+
         except:
-            time.sleep(10)
+            time.sleep(20)
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
-    
-    # Token 1: PC Status, Daily Chat
-    threading.Thread(target=vc_locker, args=(TOKEN_ONE, VC_ONE_ID, "Sentinel-1", False, False, True, False)).start()
-    threading.Thread(target=daily_spammer, daemon=True).start()
-    
-    # Token 2: PC Status, Silent
-    threading.Thread(target=vc_locker, args=(TOKEN_TWO, VC_TWO_ID, "Sentinel-2", True, True, False, False)).start()
-    
-    # Token 3: MOBILE Status, Silent, New Channel
-    threading.Thread(target=vc_locker, args=(TOKEN_THREE, VC_THREE_ID, "Sentinel-3", True, True, False, True)).start()
-    
+    for name, data in tokens.items():
+        if data["token"]:
+            threading.Thread(target=vc_locker, args=(data["token"], data["channel"], name, data["mobile"])).start()
+            if data["spam"]:
+                threading.Thread(target=daily_spammer, daemon=True).start()
+            time.sleep(random.randint(5, 15))
     while True: time.sleep(1)
         
