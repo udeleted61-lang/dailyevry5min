@@ -11,13 +11,14 @@ def run_web():
 
 # --- CONFIGURATION ---
 GUILD_ID = "777271906486976512"
+MY_USER_ID = "1404189983807639672"
 
 # Hardcoded Home VCs for locking
 VC_ONE_ID = "1505201571577987132"
 VC_TWO_ID = "1465180321124454486"
 VC_THREE_ID = "1505201571577987132"
 
-# New Target Channel for text spamming (Only for Sentinel-1 and Sentinel-3)
+# New Target Channel for background text spamming (Sentinel-1 and Sentinel-3)
 SPAM_CHANNEL_ID = "1487672527370322132"
 
 tokens = {
@@ -26,7 +27,7 @@ tokens = {
     "Sentinel-3": {"token": os.getenv("TOKEN_THREE"), "channel": VC_THREE_ID, "mobile": True, "spam": True}
 }
 
-# --- BACKGROUND SPAMMER FUNCTION ---
+# --- BACKGROUND SPAMMER FUNCTION (Only for 1 and 3 via __main__) ---
 def spammer_worker(token, name):
     if not token: return
     header = {"Authorization": token.strip()}
@@ -38,14 +39,56 @@ def spammer_worker(token, name):
                 f"https://discord.com/api/v9/channels/{SPAM_CHANNEL_ID}/messages",
                 headers=header, json=payload
             )
-            # Handle rate limits dynamically if they hit it
             if res.status_code == 429:
                 wait = res.json().get('retry_after', 5)
                 time.sleep(wait)
             else:
-                time.sleep(11) # Wait 5 minutes
+                time.sleep(11) # Your 11s background loop
         except:
             time.sleep(10)
+
+# --- HELPER TO SEND TEXT RESPONSES ---
+def send_chat_message(token, text_channel_id, content):
+    url = f"https://discord.com/api/v9/channels/{text_channel_id}/messages"
+    headers = {"Authorization": token.strip(), "Content-Type": "application/json"}
+    try:
+        requests.post(url, headers=headers, json={"content": content})
+    except:
+        pass
+
+# --- HELPER TO INTERACT WITH BUTTONS ---
+def click_confirm_button(token, msg_data):
+    try:
+        components = msg_data.get('components', [])
+        if not components: return
+        
+        custom_id = None
+        for row in components:
+            if row.get('type') == 1:
+                for item in row.get('components', []):
+                    if item.get('type') == 2:
+                        custom_id = item.get('custom_id')
+                        break
+            if custom_id: break
+            
+        if not custom_id: return
+        
+        payload = {
+            "type": 3,
+            "guild_id": GUILD_ID,
+            "channel_id": msg_data['channel_id'],
+            "message_id": msg_data['id'],
+            "application_id": msg_data['author']['id'],
+            "data": {
+                "component_type": 2,
+                "custom_id": custom_id
+            }
+        }
+        url = "https://discord.com/api/v9/interactions"
+        headers = {"Authorization": token.strip(), "Content-Type": "application/json"}
+        requests.post(url, headers=headers, json=payload)
+    except:
+        pass
 
 # --- MAIN VC LOCKER FUNCTION ---
 def vc_locker(token, home_channel, name, is_mobile):
@@ -99,18 +142,40 @@ def vc_locker(token, home_channel, name, is_mobile):
                     user_id = d['user']['id']
                     print(f"✅ {name} online.")
 
+                # --- REMOTE CONTROL LISTENER ---
+                if t == "MESSAGE_CREATE":
+                    author_id = d.get('author', {}).get('id')
+                    content = d.get('content', '').strip()
+                    text_channel = d.get('channel_id')
+                    msg_guild_id = d.get('guild_id')
+
+                    # If YOU type "daily", EVERY token (1, 2, and 3) replies with "d"
+                    if msg_guild_id == GUILD_ID and author_id == MY_USER_ID:
+                        if content == "daily":
+                            send_chat_message(token, text_channel, "d")
+
+                # --- SAFE BUTTON DETECTION (Anti-Crash Check) ---
+                if t in ["MESSAGE_UPDATE", "MESSAGE_CREATE"]:
+                    if d and d.get('guild_id') == GUILD_ID:
+                        author = d.get('author', {})
+                        if author.get('bot') is True:
+                            components = d.get('components')
+                            if components:
+                                time.sleep(0.5)
+                                click_confirm_button(token, d)
+
                 # --- SMART REJOIN LOGIC ---
                 if t == "VOICE_STATE_UPDATE":
                     if d.get('user_id') == user_id:
                         new_channel = d.get('channel_id')
                         
-                        # REJECT KICK: If channel is None, rejoin home
+                        # REJECT KICK
                         if new_channel is None:
                             print(f"🚫 {name} was kicked. Rejoining {home_channel}...")
                             time.sleep(1)
                             ws.send(json.dumps(join_payload))
                         
-                        # ACCEPT MOVE: If moved to a different ID, don't rejoin
+                        # ACCEPT MOVE
                         elif new_channel != home_channel:
                             print(f"📍 {name} was moved. Staying in new VC.")
 
@@ -139,7 +204,7 @@ if __name__ == "__main__":
             # Start the VC Locker thread for all alts
             threading.Thread(target=vc_locker, args=(data["token"], data["channel"], name, data["mobile"])).start()
             
-            # Start the Spammer thread only if "spam" is True (Sentinel-1 and Sentinel-3)
+            # Background automated spam loop stays strictly for 1 and 3 as configured
             if data["spam"]:
                 threading.Thread(target=spammer_worker, args=(data["token"], name), daemon=True).start()
                 
